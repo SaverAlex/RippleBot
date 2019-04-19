@@ -21,7 +21,7 @@ import java.util.List;
 
 class SimpleBot extends TelegramLongPollingBot {
 
-    Analysis_Alert analysis;
+    Analysis_Alert analysis = new Analysis_Alert();
     // Не работает на двух пользователей (ПОФИКСИТЬ)
 
 
@@ -105,7 +105,7 @@ class SimpleBot extends TelegramLongPollingBot {
                         sendMsg(message, Reader.xrpSellS,0);
                     }
                     catch (Exception e){
-                        System.out.println("Exeption");
+                        System.out.println(e);
                         sendMsg(message, "Введено неверное значение, попробуй ещё раз",0);
                     }
                     break;
