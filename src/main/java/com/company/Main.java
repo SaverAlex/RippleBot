@@ -16,14 +16,12 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 class SimpleBot extends TelegramLongPollingBot {
 
-    Analysis_Alert analysis = new Analysis_Alert();
-    // Не работает на двух пользователей (ПОФИКСИТЬ)
-
+    public static Map<Long, Object> dictionaryThread = new HashMap<>();
+    public static Map<String, Object> dictionaryUsers = new HashMap<>();
 
     public static void main(String[] args) {
         ApiContextInitializer.init();
@@ -48,26 +46,55 @@ class SimpleBot extends TelegramLongPollingBot {
     @Override
     public void onUpdateReceived(Update update) {
         Message message = update.getMessage();
+        Analysis_Alert analysis = findingTheObject(update);
+        System.out.println(message);
         CallbackQuery callBack = update.getCallbackQuery();
         if ((callBack!= null) && update.hasCallbackQuery()) {
+            // Работа с окном настроек
             switch (callBack.getData()){
-                case "Ждём понижения":
-                    answerCallbackQuery(callBack.getId(),"До какого момента ждём понижения ?" );
-                    Analysis_Alert.upDown = 1;
+                case "Цена продажи":
+                    analysis.buyPrice = false;
+                    answerCallbackQuery(callBack.getId(),"Сохранено" );
+
                     break;
-                case "Ждём повышения":
-                    answerCallbackQuery(callBack.getId(),"До какого момента ждём повышения ?" );
-                    Analysis_Alert.upDown = 0;
+                case "Цена покупки":
+                    analysis.buyPrice = true;
+                    answerCallbackQuery(callBack.getId(),"Сохранено" );
                     break;
             }
         }
-        System.out.println(message);
+        if (analysis.inputValue){
+            try {
+                analysis.inputValue = false;
+                analysis.value = Double.parseDouble(message.getText());
+                analysis.stoper = true;
+                analysis.setMessage(message);
+                Thread myThready = new Thread(analysis); //Создание потока "myThready"
+                dictionaryThread.put(message.getChat().getId(), myThready);
+                myThready.start();
+                String settings;
+                if (analysis.buyPrice) settings = "покупки";
+                else settings = "продажи";
+                sendMsg(message, "Запускаю анализ с следующими настройками: \n"
+                        + "- Ждём цену " + settings + "валюты"  + "\n"
+                        +" - Ожидаемая цена " + analysis.value, 0);
+            }
+            catch (Exception e){
+                System.out.println(e);
+                sendMsg(message, "Введено неверное значение, попробуй ещё раз",0);
+            }
+        }
         if (message != null && message.hasText()) {
+            // Работа с сообщениями
             switch (message.getText()) {
+                case "Привет":
+                    sendMsg(message,"Привет, "+message.getChat().getFirstName(),0);
+                     break;
                 case "Остановка Анализа":
-                    SendMessage sendMessage = new SendMessage();
-                    // тут должен убиваться поток analysis
-                    // P.S я не знаю как это делать
+                    Thread thread = (Thread) dictionaryThread.get(message.getChat().getId());
+                    thread.stop();
+                    dictionaryThread.remove(message.getChat().getId());
+                    sendMsg(message,"Процесс успешно остановлен",0);
                     break;
                 case "Курс XRP":
                     try {
@@ -75,57 +102,40 @@ class SimpleBot extends TelegramLongPollingBot {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                    sendMsg(message, "Разница: "+ Reader.sign +String.valueOf(Reader.xrpDif)+"%",0);
+                    sendMsg(message, "Разница: "+ Reader.sign +Reader.xrpDif+"%",0);
                     sendMsg(message, Reader.xrpBuyS,0);
                     sendMsg(message, Reader.xrpSellS,0);
-
                     break;
                 case "Что ты умеешь ?":
                     sendMsg(message, "Привет, меня зовут КьюБи, и я пока мало что умею, но я активно учусь, на данный момент я могу:"+
                             "\n"+ "1) Показать курс Riple",0);
                     break;
                 case "Запуск Анализа":
-                    sendMsg(message, "Запускаю анализ ...",1);
+                    if (dictionaryThread.containsKey(message.getChat().getId())){
+                        sendMsg(message,"Ошибка, прежде чем начать новый процесс анализа, остановите старый",0);
+                    }
+                    else {
+                        analysis.inputValue = true;
+                        sendMsg(message, "Введите ожидаемую цену: ",0);
+
+                    }
                    break;
-                default:
-                    try {
-                        Analysis_Alert.value = Double.parseDouble(message.getText());
-                        System.out.println("NoExeption");
-                        if (Analysis_Alert.upDown == 0 ){
-                            sendMsg(message,"Ждём рост до " + Analysis_Alert.value ,0);
-                        }
-                        else {
-                            sendMsg(message,"Ждём спад до " + Analysis_Alert.value,0);
-                        }
-                        sendMsg(message,"Веду анализ",0);
-                        analysis.run();
-                        Analysis_Alert.stoper = true;
-                        sendMsg(message, "Разница: "+ Reader.sign +String.valueOf(Reader.xrpDif)+"%",0);
-                        sendMsg(message, Reader.xrpBuyS,0);
-                        sendMsg(message, Reader.xrpSellS,0);
-                    }
-                    catch (Exception e){
-                        System.out.println(e);
-                        sendMsg(message, "Введено неверное значение, попробуй ещё раз",0);
-                    }
+                case "Настройки":
+                    sendMsg(message,"На какую цену мы будем ориентироваться:",1);
                     break;
             }
         }
-        else {
-            System.out.println("Error");
-        }
     }
 
-    private void sendMsg(Message message, String text, int type) {
+    public void sendMsg(Message message, String text, int type) {
         SendMessage sendMessage = new SendMessage();
         sendMessage.enableMarkdown(true);
         setButtons(sendMessage);
         switch (type){
             case 1:
-                sendMessage.setReplyMarkup(setInLine2());
+                sendMessage.setReplyMarkup(setInLine());
                 break;
             case 2:
-                sendMessage.setReplyMarkup(setInLine3());
         }
 
         sendMessage.setChatId(message.getChatId().toString());
@@ -172,62 +182,48 @@ class SimpleBot extends TelegramLongPollingBot {
         keyboardSecondRow.add("Запуск Анализа");
         keyboardSecondRow.add("Остановка Анализа");
 
+        KeyboardRow keyboardThirdRow = new KeyboardRow();
+        // Добавляем кнопки во вторую строчку клавиатуры
+        keyboardThirdRow.add("Настройки");
+
         // Добавляем все строчки клавиатуры в список
         keyboard.add(keyboardFirstRow);
         keyboard.add(keyboardSecondRow);
+        keyboard.add(keyboardThirdRow);
         // и устанваливаем этот список нашей клавиатуре
         replyKeyboardMarkup.setKeyboard(keyboard);
     }
-    private void setInline() {
-        List<List<InlineKeyboardButton>> buttons = new ArrayList<>();
-        List<InlineKeyboardButton> buttons1 = new ArrayList<>();
-        buttons1.add(new InlineKeyboardButton().setText("Кнопка").setCallbackData("Курс XRP"));
-        buttons.add(buttons1);
 
-        InlineKeyboardMarkup markupKeyboard = new InlineKeyboardMarkup();
-        markupKeyboard.setKeyboard(buttons);
+    private Analysis_Alert findingTheObject(Update update){
+        Analysis_Alert analysis;
+        Message message = update.getMessage();
+        String id = "";
+        if (message == null) {
+            if (update.getCallbackQuery().getFrom().getId() != null)
+                id = String.valueOf(update.getCallbackQuery().getFrom().getId());
+        }
+        else id = String.valueOf(message.getChat().getId());
+        if (dictionaryUsers.containsKey(id)){
+            analysis = (Analysis_Alert) dictionaryUsers.get(id);
+            // Проверяем есть ли у этого пользователя свой объект
+        }
+        else {
+            analysis = new Analysis_Alert();
+            // Для каждого пользователя заводим свой объект с анализом
+            dictionaryUsers.put(id, analysis);
+        }
+        return analysis;
     }
-    private InlineKeyboardMarkup setInLine2() {
+    private InlineKeyboardMarkup setInLine() {
         InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
         List<InlineKeyboardButton> rowInline = new ArrayList<>();
         List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
-        rowInline.add(new InlineKeyboardButton().setText("Ждём повышения").setCallbackData("Ждём повышения"));
-        rowInline2.add(new InlineKeyboardButton().setText("Ждём понижения").setCallbackData("Ждём понижения"));
+        rowInline.add(new InlineKeyboardButton().setText("Цена продажи").setCallbackData("Цена продажи"));
+        rowInline2.add(new InlineKeyboardButton().setText("Цена покупки").setCallbackData("Цена покупки"));
 
         rowsInline.add(rowInline);
         rowsInline.add(rowInline2);
-
-        markupInline.setKeyboard(rowsInline);
-        return markupInline;
-        //message.setReplyMarkup(markupInline);
-    }
-    private InlineKeyboardMarkup setInLine3() {
-        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline3 = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline4 = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline5 = new ArrayList<>();
-
-
-        rowInline.add(new InlineKeyboardButton().setText("-11").setCallbackData("-11"));
-        rowInline.add(new InlineKeyboardButton().setText("+11").setCallbackData("+11"));
-        rowInline2.add(new InlineKeyboardButton().setText("-8").setCallbackData("-8"));
-        rowInline2.add(new InlineKeyboardButton().setText("+8").setCallbackData("+8"));
-        rowInline3.add(new InlineKeyboardButton().setText("-5").setCallbackData("-5"));
-        rowInline3.add(new InlineKeyboardButton().setText("+5").setCallbackData("+5"));
-        rowInline4.add(new InlineKeyboardButton().setText("-3").setCallbackData("-3"));
-        rowInline4.add(new InlineKeyboardButton().setText("+3").setCallbackData("+3"));
-        rowInline5.add(new InlineKeyboardButton().setText("-1").setCallbackData("-1"));
-        rowInline5.add(new InlineKeyboardButton().setText("+1").setCallbackData("+1"));
-
-        rowsInline.add(rowInline);
-        rowsInline.add(rowInline2);
-        rowsInline.add(rowInline3);
-        rowsInline.add(rowInline4);
-        rowsInline.add(rowInline5);
 
         markupInline.setKeyboard(rowsInline);
         return markupInline;

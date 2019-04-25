@@ -47,7 +47,7 @@ public class Reader {
             }
 
     }
-    private static String ParserEL (Elements element){
+    public static String ParserEL (Elements element){
         String result;
         int ind = element.toString().indexOf(">");
         result = element.toString().substring(ind);
